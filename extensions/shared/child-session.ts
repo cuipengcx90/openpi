@@ -732,21 +732,25 @@ export async function bindChildSessionExtensions(
   await session.bindExtensions({ mode: "print" });
   const requested = effectiveChildToolAllowlist(requestedTools);
   let active: Set<string> | undefined;
+  let available: Set<string> | undefined;
   if (
     session.getActiveToolNames &&
     session.getAllTools &&
     session.setActiveToolsByName
   ) {
     const requestedSet = requested ? new Set(requested) : undefined;
-    const available = new Set(session.getAllTools().map(({ name }) => name));
+    available = new Set(session.getAllTools().map(({ name }) => name));
     const activeNames = session.getActiveToolNames();
     active = new Set(activeNames);
-    for (const name of CHILD_SAFE_PACKAGE_TOOL_NAMES) {
-      if (
-        available.has(name) &&
-        !active.has(name) &&
-        (requestedSet === undefined || requestedSet.has(name))
-      ) {
+    // 父级继承来的工具在子会话里往往只是"已注册但未激活"：内置扩展注册的
+    // tool_search / codemode，以及包提供的 web_search、agent_browser* 等，
+    // 都需要一次显式激活才会进入子会话的活动面。requested 是父级活动面去掉
+    // parent-only 工具后的白名单，按它激活不放宽任何边界；requested 缺失时
+    // 退回 CHILD_SAFE_PACKAGE_TOOL_NAMES。
+    const toActivate =
+      requestedSet ?? new Set<string>([...CHILD_SAFE_PACKAGE_TOOL_NAMES]);
+    for (const name of toActivate) {
+      if (available.has(name) && !active.has(name)) {
         activeNames.push(name);
         active.add(name);
       }
@@ -769,8 +773,21 @@ export async function bindChildSessionExtensions(
   const missing = [...new Set(requested)].filter((name) => !active.has(name));
   if (missing.length === 0) return;
 
-  throw new Error(
-    `Child tool preflight failed: requested tool${missing.length === 1 ? "" : "s"} ${boundedToolNames(missing)} ${missing.length === 1 ? "is" : "are"} unavailable after child extensions initialized. Check the Agent Type tools list and child extension loading.`,
+  // `requested` is inherited from the parent's live tool surface, so a name the
+  // child cannot expose is not automatically an error. A parent can hold tools
+  // the child legitimately never gets: runtime-registered ones (an MCP server's
+  // tools, a package that activates tools on demand) or names no child
+  // extension registered at all. Failing the whole spawn over one of those is
+  // worse than running without it, so drop them and report once instead. The
+  // counts keep a genuine loading failure visible instead of silent.
+  const registeredCount = available?.size ?? 0;
+  const unregisteredCount = available
+    ? missing.filter((name) => !available.has(name)).length
+    : 0;
+  console.warn(
+    `[openpi] child tool surface narrowed: ${missing.length} of ${requested.length} requested tool(s) unavailable ` +
+      `(${unregisteredCount} never registered, ${missing.length - unregisteredCount} registered but inactive; ` +
+      `${active.size} active of ${registeredCount} registered). Dropped: ${boundedToolNames(missing)}`,
   );
 }
 
