@@ -2,8 +2,6 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  createCodemodeExtension,
-  createToolSearchExtension,
   DefaultPackageManager,
   DefaultResourceLoader,
   getAgentDir,
@@ -16,6 +14,7 @@ import {
   type SourceInfo,
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
+import { createPiBuiltinExtensionFactories } from "./pi-builtin-extensions.ts";
 import {
   OPENPI_OWNER_SOURCE_PATHS,
   OPENPI_TOOL_SURFACE,
@@ -656,28 +655,11 @@ export async function createChildResources(options: ChildResourceOptions) {
     cwd: options.cwd,
     agentDir,
     settingsManager,
-    // Pi's built-in extensions (codemode, tool-search, mcp, llama.cpp) carry
-    // `builtin: true`; their code reaches a loader only through
-    // `extensionFactories`, which the CLI's main() supplies and an SDK caller
-    // must supply itself. Without this the child has no built-in registry at
-    // all, so it never registers tool_search/codemode. Inject the two the
-    // parent activates; mcp and llama.cpp stay out on purpose — a user's own
-    // MCP extension replaces the former, and the latter only serves local
-    // models.
-    extensionFactories: [
-      {
-        name: "tool-search",
-        factory: createToolSearchExtension(),
-        builtin: true,
-        replaceable: true,
-      },
-      {
-        name: "codemode",
-        factory: createCodemodeExtension(),
-        builtin: true,
-        replaceable: true,
-      },
-    ],
+    // A child is an SDK session, so it inherits no built-in registry unless
+    // this loader passes one (see pi-builtin-extensions.ts). Without it
+    // tool_search and codemode are never registered in the child, which is a
+    // capability loss no child-safe activation list can repair.
+    extensionFactories: createPiBuiltinExtensionFactories(),
     extensionsOverride(base) {
       const withoutGitInfo = excludeOpenPiGitInfoExtension(base);
       return {
