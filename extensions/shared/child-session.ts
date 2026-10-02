@@ -2,6 +2,8 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  createCodemodeExtension,
+  createToolSearchExtension,
   DefaultPackageManager,
   DefaultResourceLoader,
   getAgentDir,
@@ -654,6 +656,28 @@ export async function createChildResources(options: ChildResourceOptions) {
     cwd: options.cwd,
     agentDir,
     settingsManager,
+    // Pi's built-in extensions (codemode, tool-search, mcp, llama.cpp) carry
+    // `builtin: true`; their code reaches a loader only through
+    // `extensionFactories`, which the CLI's main() supplies and an SDK caller
+    // must supply itself. Without this the child has no built-in registry at
+    // all, so it never registers tool_search/codemode. Inject the two the
+    // parent activates; mcp and llama.cpp stay out on purpose — a user's own
+    // MCP extension replaces the former, and the latter only serves local
+    // models.
+    extensionFactories: [
+      {
+        name: "tool-search",
+        factory: createToolSearchExtension(),
+        builtin: true,
+        replaceable: true,
+      },
+      {
+        name: "codemode",
+        factory: createCodemodeExtension(),
+        builtin: true,
+        replaceable: true,
+      },
+    ],
     extensionsOverride(base) {
       const withoutGitInfo = excludeOpenPiGitInfoExtension(base);
       return {
@@ -725,9 +749,22 @@ function boundedToolNames(names: readonly string[]) {
  * Parent-only names are deliberately ignored here: the denylist remains
  * authoritative, so naming one can never turn this check into a grant.
  */
+export interface ChildToolPreflightOptions {
+  /**
+   * Treat a requested name the child cannot expose as a narrowed child instead
+   * of a configuration error. Callers that pass the parent's inherited tool
+   * surface need this: a package may register a tool only after the model
+   * enables it, and an SDK child never loads Pi's built-in extensions unless
+   * the caller injects them. An explicit allowlist leaves this off, so a
+   * declared name still fails before the first prompt.
+   */
+  tolerateInheritedMisses?: boolean;
+}
+
 export async function bindChildSessionExtensions(
   session: ChildSessionStartup,
   requestedTools?: readonly string[],
+  options?: ChildToolPreflightOptions,
 ) {
   await session.bindExtensions({ mode: "print" });
   const requested = effectiveChildToolAllowlist(requestedTools);
@@ -772,6 +809,14 @@ export async function bindChildSessionExtensions(
 
   const missing = [...new Set(requested)].filter((name) => !active.has(name));
   if (missing.length === 0) return;
+
+  // An explicit allowlist is a claim about what the child must have, so a name
+  // it names still fails before the first prompt.
+  if (!options?.tolerateInheritedMisses) {
+    throw new Error(
+      `Child tool preflight failed: requested tool${missing.length === 1 ? "" : "s"} ${boundedToolNames(missing)} ${missing.length === 1 ? "is" : "are"} unavailable after child extensions initialized. Check the Agent Type tools list and child extension loading.`,
+    );
+  }
 
   // `requested` is inherited from the parent's live tool surface, so a name the
   // child cannot expose is not automatically an error. A parent can hold tools
