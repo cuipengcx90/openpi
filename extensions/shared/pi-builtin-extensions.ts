@@ -5,6 +5,19 @@ import {
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 
+const builtinFactories = [
+  { name: "tool-search", create: createToolSearchExtension },
+  { name: "codemode", create: createCodemodeExtension },
+  { name: "mcp", create: createMcpExtension },
+] as const;
+
+/** Only the factories supplied by this module have a Pi-version-bound identity. */
+export function isPiBuiltinExtensionPath(extensionPath: string) {
+  return builtinFactories.some(
+    ({ name }) => extensionPath === `builtin:${name}`,
+  );
+}
+
 /**
  * Pi's built-in extensions reach a resource loader only through
  * `extensionFactories`. They carry `builtin: true`, the CLI's `main()` supplies
@@ -20,24 +33,10 @@ import {
  * through the `replaceable` flag.
  */
 export function createPiBuiltinExtensionFactories(): InlineExtension[] {
-  return [
-    {
-      name: "tool-search",
-      factory: createToolSearchExtension(),
-      builtin: true,
-      replaceable: true,
-    },
-    {
-      name: "codemode",
-      factory: createCodemodeExtension(),
-      builtin: true,
-      replaceable: true,
-    },
-    {
-      name: "mcp",
-      factory: createMcpExtension(),
-      builtin: true,
-      replaceable: true,
-    },
-  ];
+  return builtinFactories.map(({ name, create }) => ({
+    name,
+    factory: create(),
+    builtin: true,
+    replaceable: true,
+  }));
 }

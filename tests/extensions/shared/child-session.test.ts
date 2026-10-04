@@ -153,6 +153,43 @@ test("explicit child tools are checked against the final bound registry", async 
   });
 });
 
+test("SDK children register inherited Pi built-ins without admitting unrelated tools", async () => {
+  await withTempDir(async (cwd) => {
+    const agentDir = path.join(cwd, "agent");
+    const requested = ["read", "codemode", "tool_search"];
+    const resources = await createChildResources({
+      cwd,
+      agentDir,
+      projectTrusted: false,
+    });
+    assert.deepEqual(resources.loader.getExtensions().errors, []);
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir,
+      resourceLoader: resources.loader,
+      settingsManager: resources.settingsManager,
+      sessionManager: SessionManager.inMemory(cwd),
+      ...childToolPolicy(requested),
+    });
+    try {
+      await bindChildSessionExtensions(session, requested);
+      assert.deepEqual(
+        session.getActiveToolNames().sort(),
+        [...requested].sort(),
+      );
+      assert.deepEqual(
+        session
+          .getAllTools()
+          .map(({ name }) => name)
+          .sort(),
+        [...requested].sort(),
+      );
+    } finally {
+      await shutdownAndDisposeChildSession(session);
+    }
+  });
+});
+
 test("child binding restores only requested child-safe package tools after parent surface gating", async () => {
   await withTempDir(async (directory) => {
     const settingsManager = SettingsManager.inMemory(undefined, {
