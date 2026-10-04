@@ -30,6 +30,11 @@ points now derive the flag from whether the selected agent type omits `tools`.
 This preserves the difference between an inherited surface and an explicit role
 requirement at the point where the two are still distinguishable.
 
+Independent review also reproduced a registered `hidden` tool that Pi refused
+to activate. The original preflight counted its activation request as success.
+The check now re-reads Pi's actual active tools after activation, so an explicit
+requirement rejects and an inherited miss reports the narrowed surface.
+
 ## Replay identity
 
 Native and inline extensions have synthetic paths. Treating them as files
@@ -52,6 +57,8 @@ The checked-in regressions exercise:
   `tool_search`, without admitting unrelated tools;
 - both public entry points, proving an inherited miss can complete while an
   explicit miss rejects before any child prompt;
+- an actual SDK `hidden` tool, proving a refused activation cannot satisfy an
+  explicit requirement or widen the inherited callable surface;
 - real SDK loaders with distinct inline hooks, proving replay remains disabled
   when their implementation identity cannot be verified;
 - the three reviewed native factories separately, proving their enabled

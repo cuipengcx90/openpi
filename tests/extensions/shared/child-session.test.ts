@@ -190,6 +190,70 @@ test("SDK children register inherited Pi built-ins without admitting unrelated t
   });
 });
 
+test("child preflight reads Pi's actual active surface after a rejected activation", async () => {
+  await withTempDir(async (cwd) => {
+    const agentDir = path.join(cwd, "agent");
+    const settingsManager = SettingsManager.inMemory();
+    const loader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      settingsManager,
+      extensionFactories: [
+        {
+          name: "hidden-fixture",
+          factory(pi) {
+            pi.registerTool({
+              name: "hidden_fixture_tool",
+              label: "Hidden fixture",
+              description: "Pi cannot activate this tool",
+              exposure: "hidden",
+              parameters: Type.Object({}),
+              async execute() {
+                return {
+                  content: [{ type: "text", text: "fixture" }],
+                  details: {},
+                };
+              },
+            });
+          },
+        },
+      ],
+    });
+    await loader.reload();
+    assert.deepEqual(loader.getExtensions().errors, []);
+    const requested = ["hidden_fixture_tool"];
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir,
+      settingsManager,
+      resourceLoader: loader,
+      sessionManager: SessionManager.inMemory(cwd),
+      ...childToolPolicy(requested),
+    });
+    try {
+      assert.equal(session.getAllTools()[0]?.name, requested[0]);
+      await assert.rejects(
+        bindChildSessionExtensions(session, requested),
+        /Child tool preflight failed: requested tool "hidden_fixture_tool" is unavailable/,
+      );
+      assert.deepEqual(session.getActiveToolNames(), []);
+      assert.deepEqual(session.getCallableToolNames(), []);
+      assert.equal(
+        session.messages.length,
+        0,
+        "reject before the first prompt",
+      );
+      await bindChildSessionExtensions(session, requested, {
+        tolerateInheritedMisses: true,
+      });
+      assert.deepEqual(session.getActiveToolNames(), []);
+      assert.deepEqual(session.getCallableToolNames(), []);
+    } finally {
+      await shutdownAndDisposeChildSession(session);
+    }
+  });
+});
+
 test("child binding restores only requested child-safe package tools after parent surface gating", async () => {
   await withTempDir(async (directory) => {
     const settingsManager = SettingsManager.inMemory(undefined, {

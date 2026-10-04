@@ -777,6 +777,9 @@ export async function bindChildSessionExtensions(
     if (activeNames.length !== session.getActiveToolNames().length) {
       session.setActiveToolsByName(activeNames);
     }
+    // Pi can refuse activation (for example, hidden exposure). Requested
+    // activation is not evidence that the final bound Session exposes a tool.
+    active = new Set(session.getActiveToolNames());
   }
   if (!requested) return;
 
